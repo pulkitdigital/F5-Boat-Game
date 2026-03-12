@@ -47,37 +47,42 @@ export default function InputPage() {
 
   useEffect(() => {
     const unsub = subscribeScores((data) => {
+      // Always update scores for stats/display
       setScores(data);
       setConnected(true);
+
       if (!initialLoadDone.current) {
-        // First load only: jump to first empty slot
         initialLoadDone.current = true;
         setFetching(false);
         const firstEmpty = data.findIndex((v) => v === "" || v === null);
         const jumpTo = firstEmpty === -1 ? QUESTION_COUNT - 1 : firstEmpty;
-        setActiveQ(jumpTo);
-        // Prefill only if resuming (slot already has a value)
+        // Prefill only if resuming a question that already has a value
         const existing = data[jumpTo];
-        setLocalVal(existing !== "" && existing !== null ? String(existing) : "");
+        const prefill = existing !== "" && existing !== null ? String(existing) : "";
+        setLocalVal(prefill);
+        setActiveQ(jumpTo);
         if (firstEmpty === -1) setGameFinished(true);
       }
-      // After first load: NEVER touch localVal from Firebase listener
-      // User must type manually — Firebase only updates scores for stats/display
+      // After first load: never touch localVal or activeQ from Firebase
     });
     return () => unsub();
   }, []);
 
-  const activeQRef = useRef(activeQ);
+  // When user manually taps a Q tile — prefill that slot's saved value
+  // Use a separate ref flag to distinguish manual tap vs initial load
+  const manualNavRef = useRef(false);
   useEffect(() => {
-    const prev = activeQRef.current;
-    activeQRef.current = activeQ;
-    if (!initialLoadDone.current) return;
-    if (prev === activeQ) return; // no change, don't reset user input
-    // User navigated to a different Q — prefill its saved value
+    if (!manualNavRef.current) return;
+    manualNavRef.current = false;
     const existing = scores[activeQ];
     setLocalVal(existing !== "" && existing !== null ? String(existing) : "");
     inputRef.current?.focus();
   }, [activeQ]);
+
+  const goToQuestion = (index) => {
+    manualNavRef.current = true;
+    setActiveQ(index);
+  };
 
   const total = calcTotal(scores);
   const filled = calcFilled(scores);
@@ -110,8 +115,9 @@ export default function InputPage() {
       if (activeQ === QUESTION_COUNT - 1) { setGameFinished(true); return; }
       setFlash(activeQ);
       setTimeout(() => setFlash(null), 600);
-      setActiveQ((q) => q + 1);
+      // Go to next question directly — no manualNav flag needed here
       setLocalVal("");
+      setActiveQ(activeQ + 1);
     } finally { setSaving(false); }
   };
 
@@ -297,7 +303,7 @@ export default function InputPage() {
               return (
                 <button
                   key={i}
-                  onClick={() => setActiveQ(i)}
+                  onClick={() => goToQuestion(i)}
                   className="qbtn"
                   style={{
                     borderRadius: 10, padding: isMobile ? "8px 0" : "10px 0", border: "none",
