@@ -50,21 +50,30 @@ export default function InputPage() {
       setScores(data);
       setConnected(true);
       if (!initialLoadDone.current) {
+        // First load only: jump to first empty slot
         initialLoadDone.current = true;
         setFetching(false);
         const firstEmpty = data.findIndex((v) => v === "" || v === null);
         const jumpTo = firstEmpty === -1 ? QUESTION_COUNT - 1 : firstEmpty;
         setActiveQ(jumpTo);
+        // Prefill only if resuming (slot already has a value)
         const existing = data[jumpTo];
         setLocalVal(existing !== "" && existing !== null ? String(existing) : "");
         if (firstEmpty === -1) setGameFinished(true);
       }
+      // After first load: NEVER touch localVal from Firebase listener
+      // User must type manually — Firebase only updates scores for stats/display
     });
     return () => unsub();
   }, []);
 
+  const activeQRef = useRef(activeQ);
   useEffect(() => {
+    const prev = activeQRef.current;
+    activeQRef.current = activeQ;
     if (!initialLoadDone.current) return;
+    if (prev === activeQ) return; // no change, don't reset user input
+    // User navigated to a different Q — prefill its saved value
     const existing = scores[activeQ];
     setLocalVal(existing !== "" && existing !== null ? String(existing) : "");
     inputRef.current?.focus();
@@ -74,28 +83,28 @@ export default function InputPage() {
   const filled = calcFilled(scores);
   const pct = calcProgress(total).toFixed(1);
   const isComplete = gameFinished;
-  const hasVal = localVal !== "" && localVal !== null;
+  const hasVal = String(localVal).trim() !== "" && localVal !== null && localVal !== undefined;
 
   const handleChange = (val) => {
+    // ONLY update local input state — NO Firebase save here
+    // Firebase push happens ONLY on Next/Finish button click
     if (val === "") { setLocalVal(""); return; }
     const num = Math.max(0, Math.min(100, Number(val)));
     setLocalVal(String(num));
-    const isLastQ = activeQ === QUESTION_COUNT - 1;
-    if (!isLastQ) {
-      const updated = [...scores];
-      updated[activeQ] = num;
-      setScores(updated);
-      saveScores(updated);
-    }
   };
 
   const handleNext = async () => {
-    if (localVal === "" || localVal === null || saving) return;
+    // Strict guard: must have a non-empty string that is a valid number
+    const trimmed = String(localVal).trim();
+    if (trimmed === "" || trimmed === null || saving) return;
+    const num = Number(trimmed);
+    if (isNaN(num)) return;
+
     setSaving(true);
     try {
-      const num = Math.max(0, Math.min(100, Number(localVal)));
+      const clamped = Math.max(0, Math.min(100, num));
       const updated = [...scores];
-      updated[activeQ] = num;
+      updated[activeQ] = clamped;
       setScores(updated);
       await saveScores(updated);
       if (activeQ === QUESTION_COUNT - 1) { setGameFinished(true); return; }
